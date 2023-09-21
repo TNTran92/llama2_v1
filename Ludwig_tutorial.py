@@ -13,6 +13,13 @@ read_token = "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"
 os.environ["HUGGING_FACE_HUB_TOKEN"] = read_token
 assert os.environ["HUGGING_FACE_HUB_TOKEN"]
 
+def clear_cache():
+  if torch.cuda.is_available():
+    model = None
+    torch.cuda.empty_cache()
+
+clear_cache()
+
 df = pd.read_json("https://raw.githubusercontent.com/sahil280114/codealpaca/master/data/code_alpaca_20k.json")
 
 # We're going to create a new column called `split` where:
@@ -45,13 +52,13 @@ print(df.head(10))
 print('End of file')
 
 num_self_sufficient = (df['input'] == '').sum()
-num_need_contex = df.shape[0] - num_self_sufficient
+num_need_context = df.shape[0] - num_self_sufficient
 
 # We are only using 100 rows of this dataset for this webinar
 print(f"Total number of examples in the dataset: {df.shape[0]}")
 
 print(f"% of examples that are self-sufficient: {round(num_self_sufficient/df.shape[0] * 100, 2)}")
-print(f"% of examples that are need additional context: {round(num_need_contex/df.shape[0] * 100, 2)}")
+print(f"% of examples that are need additional context: {round(num_need_context/df.shape[0] * 100, 2)}")
 
 # Calculating the length of each cell in each column
 df['num_characters_instruction'] = df['instruction'].apply(lambda x: len(x))
@@ -98,7 +105,7 @@ zero_shot_config = yaml.safe_load(
 
   generation:
     temperature: 0.1 # Temperature is used to control the randomness of predictions.
-    max_new_tokens: 512
+    max_new_tokens: 1024
 
   preprocessing:
     split:
@@ -109,11 +116,13 @@ zero_shot_config = yaml.safe_load(
   """
 )
 
-# Just run on 10 examples for now
-model = LudwigModel(config=zero_shot_config, logging_level=logging.INFO)
-#results = model.train(dataset=df)
+#model = LudwigModel(config=zero_shot_config, logging_level=logging.INFO)
+#results = model.train(dataset=df[:10])
 
 # Fine-tune
+model = None
+clear_cache()
+
 qlora_fine_tuning_config = yaml.safe_load(
 """
 model_type: llm
@@ -149,25 +158,24 @@ adapter:
 quantization:
   bits: 4
 
+preprocessing:
+  global_max_sequence_length: 512
+  split:
+    type: random
+    probabilities:
+    - 1
+    - 0
+    - 0
+
 trainer:
   type: finetune
-  epochs: 1
+  epochs: 5
   batch_size: 3
   eval_batch_size: 2
   gradient_accumulation_steps: 16
-  learning_rate: 0.00001
-  optimizer:
-    type: adam
-    params:
-      eps: 1.e-8
-      betas:
-        - 0.9
-        - 0.999
-      weight_decay: 0
+  learning_rate: 0.0004
   learning_rate_scheduler:
-    decay: cosine
     warmup_fraction: 0.03
-    reduce_on_plateau: 0
 """
 )
 
@@ -177,19 +185,23 @@ results = model.train(dataset=df)
 # Make prediction
 test_examples = pd.DataFrame([
       {
-            "instruction": "Tell me a story in 400 words about a newborn T-rex named Dino who is smart, good-natured and inquisitive.",
-            "input": '',
-      },
-      {
-            "instruction": "Tell me a story about a red early bird that shares strawberry with worms. Give as much details as you can.",
+            "instruction": "Tell me a story about a red T-rex and her baby who looks just like her.",
             "input": "",
       },
       {
-            "instruction": "Tell me a story about a pink whale that shares blankets with friends. I want a 500 words story.",
+            "instruction": "Tell me a story about a white puppy that loves snuggling and play around.",
             "input": "",
       },
       {
-            "instruction": "Tell me a story about a little duckey that loves fixing car. Be very specific.",
+            "instruction": "Tell me a story about a red early bird that shares strawberry with worms.",
+            "input": "",
+      },
+      {
+            "instruction": "Tell me a story about a pink whale that shares blankets with friends.",
+            "input": "",
+      },
+      {
+            "instruction": "Tell me a story about a baby donkey that loves fixing car.",
             "input": "",
       }
 ])
